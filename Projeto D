@@ -1,0 +1,108 @@
+import numpy as np
+from scipy.optimize import newton
+
+teste_p = {'S0':'15300,0.41,60,30,0,4708.5603',
+         'S1':'16100,0.342,10,30,40,5082.6453',
+         'S2':'17800,0.235,30,0,40,5908.5511',
+         'S3':'16400,0.3725,60,20,40,5225.3666'}
+t_p = list(teste_p.values())
+
+t_TOA = 60000
+TOT = {'T_1': 13581.1080927,
+         'T_2': 19719.32768037,
+         'T_3': 11757.73393255,
+         'T_4': 20172.46081236}
+
+t_TOT = TOT.values()
+TOF = []
+for  i in t_TOT:
+    k = (t_TOA - i)/1000
+    TOF.append(k)
+
+
+def string_float(string):
+    entrada = string.split(',')
+    f = []
+    for i in entrada:
+        f.append(float(i))
+    return f
+
+def position(in_kepler):
+    # CONSTANTES # 
+    u = 3.986004418e5
+
+    # ENTRADA DE DADOS
+    dados = string_float(in_kepler)
+    
+    # ELEMENTOS ORBITAIS DE KEPLER #
+    a = float(dados[0])
+    e = float(dados[1])
+    w = np.radians(float(dados[2]))
+    i = np.radians(float(dados[3]))
+    o = np.radians(float(dados[4]))
+    dt = float(dados[5])
+    #dt = float(dados[5])#
+
+    # RESOLUÇÃO
+    T = 2 * np.pi * np.sqrt(a**3 / u)
+    M_e = 2 * np.pi * dt / T
+
+    def kepler(E, M_e, e):
+        return E - e * np.sin(E) - M_e
+
+    def d_kepler_d_E(E, M_e, e):
+        return 1 - e * np.cos(E)
+
+    E = newton(func=kepler, fprime=d_kepler_d_E, x0=np.pi, args=(M_e, e))
+
+    xw = a * (np.cos(E) - e)
+    yw = a * np.sin(E) * np.sqrt(1 - e**2)
+
+    pos_perifocal = np.array([xw, yw, 0])
+
+    # MATRIZEZ DE ROTAÇÃO 
+    def rot_x(theta):
+        return np.array([[1, 0, 0],
+                        [0, np.cos(theta), -np.sin(theta)],
+                        [0, np.sin(theta), np.cos(theta)]])
+
+    def rot_z(theta):
+        return np.array([[np.cos(theta), -np.sin(theta), 0],
+                        [np.sin(theta), np.cos(theta), 0],
+                        [0, 0, 1]])
+
+    # TRANSFORMAÇÃO ECI
+    R = rot_z(o) @ rot_x(i) @ rot_z(w)
+
+    pos_ECI = R @ pos_perifocal
+    return pos_ECI
+
+n = len(t_p)
+
+r_s = []
+for i in range(n):
+    k = position(t_p[i])
+    r_s.append(k)
+
+def gradiente(r_s, r, TOF, n):
+    # CONSTANTES
+    c = 300
+    grad = 0
+    for i in range(n):
+        # DISTÂNCIA SATÉLITE - RECEPTOR
+        p = c * TOF[i]
+        # APLICAÇÃO NO GRADIENTE
+        d_vet =  r - r_s[i] 
+        modulo = np.linalg.norm(d_vet)
+        R = 1 - (p / modulo)
+        grad = grad + R * np.array([d_vet[0], d_vet[1], d_vet[2]])
+    return grad
+
+#CHUTE
+r = (-6420., -6432., 6325.)
+#r = np.array([0,0,0])
+
+for i in range(800):
+    G = gradiente(r_s, r, TOF, n)
+    r = r - 0.6*G
+print(r)
